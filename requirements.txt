@@ -1,0 +1,6 @@
+
+python==4.5.1
+numpy==1.19.5
+flask==2.0.3
+geopy.geocoders
+pickle
