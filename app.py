@@ -1,27 +1,22 @@
-import os, sys, shutil, time
-
-from flask import Flask, request, jsonify, render_template,send_from_directory
+import os
+from flask import Flask, request, render_template, send_from_directory
 import pandas as pd
 import joblib
-from sklearn.ensemble import RandomForestClassifier
 import numpy as np
-import urllib.request
-import json
 from geopy.geocoders import Nominatim
-
-
 
 app = Flask(__name__)
 
-
+# A dummy path for the images folder, adjust if necessary
+app.config['images'] = os.path.join('static', 'images')
 
 @app.route('/')
 def root():
     return render_template('index.html')
 
-@app.route('/images/<predictor>')
-def download_file(CrimeRatePrediction):
-    return send_from_directory(app.config['images'], CrimeRatePrediction)
+@app.route('/images/<filename>')
+def download_file(filename):
+    return send_from_directory(app.config['images'], filename)
 
 @app.route('/index.html')
 def index():
@@ -35,66 +30,70 @@ def work():
 def about():
     return render_template('about.html')
 
-@app.route('/result.html', methods = ['POST'])
+@app.route('/result.html', methods=['POST'])
 def predict():
+    # Load the trained model
     rfc = joblib.load('rf_model')
-    print('model loaded')
+    print('Model loaded')
 
     if request.method == 'POST':
-
+        # 1. Get location and timestamp from the form
         address = request.form['Location']
-        geolocator = Nominatim()
-        location = geolocator.geocode(address,timeout=None)
-        print(location.address)
-        lat=[location.latitude]
-        log=[location.longitude]
-        latlong=pd.DataFrame({'latitude':lat,'longitude':log})
-        print(latlong)
+        dt_string = request.form['timestamp']
 
-        DT= request.form['timestamp']
-        latlong['timestamp']=DT
-        data=latlong
-        cols = data.columns.tolist()
-        cols = cols[-1:] + cols[:-1]
-        data = data[cols]
+        # 2. Convert location name to latitude and longitude
+        geolocator = Nominatim(user_agent="crime_predictor_app_final_v2") # Use a unique agent
+        location = geolocator.geocode(address, timeout=None)
+        
+        if location is None:
+            return render_template('result.html', prediction="Error: Location could not be found. Please try again with a more specific address.")
 
-        data['timestamp'] = pd.to_datetime(data['timestamp'].astype(str), errors='coerce')
-        data['timestamp'] = pd.to_datetime(data['timestamp'], format = '%d/%m/%Y %H:%M:%S')
-        column_1 = data.ix[:,0]
-        DT=pd.DataFrame({"year": column_1.dt.year,
-              "month": column_1.dt.month,
-              "day": column_1.dt.day,
-              "hour": column_1.dt.hour,
-              "dayofyear": column_1.dt.dayofyear,
-              "week": column_1.dt.week,
-              "weekofyear": column_1.dt.weekofyear,
-              "dayofweek": column_1.dt.dayofweek,
-              "weekday": column_1.dt.weekday,
-              "quarter": column_1.dt.quarter,
-             })
-        data=data.drop('timestamp',axis=1)
-        final=pd.concat([DT,data],axis=1)
-        X=final.iloc[:,[1,2,3,4,6,10,11]].values
-        my_prediction = rfc.predict(X)
-        if my_prediction[0][0] == 1:
-            my_prediction='Predicted crime : Act 379-Robbery'
-        elif my_prediction[0][1] == 1:
-            my_prediction='Predicted crime : Act 13-Gambling'
-        elif my_prediction[0][2] == 1:
-            my_prediction='Predicted crime : Act 279-Accident'
-        elif my_prediction[0][3] == 1:
-            my_prediction='Predicted crime : Act 323-Violence'
-        elif my_prediction[0][4] == 1:
-            my_prediction='Predicted crime : Act 302-Murder'
-        elif my_prediction[0][5] == 1:
-            my_prediction='Predicted crime : Act 363-kidnapping'
+        lat = location.latitude
+        log = location.longitude
+        print(f"Location found: {location.address} -> Lat: {lat}, Lon: {log}")
+
+        # 3. Convert string to a single pandas Timestamp object
+        timestamp = pd.to_datetime(dt_string, dayfirst=True)
+
+        # 4. **FINAL ROBUST METHOD: Create a simple list of features**
+        # To bypass the strange issue with .weekday, we will use .dayofweek for both.
+        
+        working_dayofweek = timestamp.dayofweek # This is a number (e.g., 5 for Saturday)
+
+        features_list = [
+            timestamp.year,
+            timestamp.month,
+            timestamp.day,
+            timestamp.hour,
+            timestamp.dayofyear,
+            timestamp.isocalendar().week,
+            timestamp.isocalendar().week,  # for weekofyear
+            working_dayofweek,            # for dayofweek
+            working_dayofweek,            # for weekday (using the one we know works)
+            timestamp.quarter,
+            0,  # act13
+            0,  # act279
+            0,  # act323
+            0,  # act363
+            0,  # act302
+            lat,
+            log
+        ]
+        
+        # 5. Convert list to a 2D NumPy array for the model
+        final_features = np.array(features_list).reshape(1, -1)
+        print(f"Features created for prediction: {final_features}")
+
+        # 6. Make the prediction
+        my_prediction = rfc.predict(final_features)
+
+        # 7. Interpret the result
+        if my_prediction[0] == 1:
+            prediction_text = 'Predicted crime: Act 379 - Robbery'
         else:
-            my_prediction='Place is safe no crime expected at that timestamp.'
+            prediction_text = 'Place is safe. No crime (Act 379) is expected at that timestamp.'
 
-
-
-    return render_template('result.html', prediction = my_prediction)
-
+    return render_template('result.html', prediction=prediction_text)
 
 if __name__ == '__main__':
-    app.run(debug = True)
+    app.run(debug=True)
