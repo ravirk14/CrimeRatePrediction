@@ -30,7 +30,7 @@ To use the repo and run inferences, please follow the guidelines below:
 
 - Clone the Repository:
 
-        $ git clone https://github.com/Ananya-Jha-code/CrimeRatePrediction.git
+        $ git clone https://github.com/CrimeRatePrediction/CrimeRatePrediction.git
 
 
 - Enter the directory:
